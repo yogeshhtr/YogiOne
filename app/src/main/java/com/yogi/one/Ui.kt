@@ -1,6 +1,9 @@
 package com.yogi.one
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -9,16 +12,14 @@ import android.graphics.drawable.RippleDrawable
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -85,7 +86,7 @@ fun <T : View> T.lin(
 }
 
 fun Context.card(color: Int = C.CARD): LinearLayout = vbox().apply {
-    background = rounded(color, dpf(22f))
+    background = ripple(color, 22f)   // shows a touch effect when the card is tappable
     val p = dp(16)
     setPadding(p, p, p, p)
 }.lin(l = dp(14), t = dp(6), r = dp(14), b = dp(6))
@@ -201,16 +202,65 @@ fun Context.toast(s: String) {
     Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 }
 
-fun Context.spinner(items: List<String>, sel: Int, onPick: (Int) -> Unit): Spinner {
-    val sp = Spinner(this)
-    sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
-    sp.setSelection(sel)
-    sp.background = rounded(C.CARD2, dpf(14f))
-    sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-        override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, rowId: Long) { onPick(pos) }
-        override fun onNothingSelected(parent: AdapterView<*>?) {}
+/**
+ * A drop-down that looks like the text boxes (proper padding + ▾). Tap = list to choose from.
+ * Replaces Android's Spinner, which had no padding on our dark boxes.
+ */
+fun Context.picker(items: List<String>, sel: Int, onPick: (Int) -> Unit): LinearLayout {
+    var cur = sel.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+    val row = hbox()
+    row.background = ripple(C.CARD2, 14f)
+    row.setPadding(dp(14), dp(13), dp(14), dp(13))
+    val text = label(items.getOrElse(cur) { "" }, 16f, C.TEXT, true)
+    text.maxLines = 1
+    row.addView(text.lin(0, WRAP, 1f))
+    row.addView(label("▾", 16f, C.SUB).lin(WRAP, WRAP, l = dp(8)))
+    row.setOnClickListener {
+        AlertDialog.Builder(this)
+            .setSingleChoiceItems(items.toTypedArray(), cur) { d, which ->
+                cur = which
+                text.text = items[which]
+                d.dismiss()
+                onPick(which)
+            }
+            .show()
     }
-    return sp.lin(t = dp(6), b = dp(6))
+    return row.lin(t = dp(6), b = dp(6))
+}
+
+/** Multi-line text box. */
+fun Context.textArea(hintText: String, value: String = "", lines: Int = 6): EditText = EditText(this).apply {
+    hint = hintText
+    setSingleLine(false)
+    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+    minLines = lines
+    maxLines = 14
+    gravity = Gravity.TOP or Gravity.START
+    setText(value)
+    setHintTextColor(C.SUB)
+    setTextColor(C.TEXT)
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+    background = rounded(C.CARD2, dpf(14f))
+    setPadding(dp(14), dp(12), dp(14), dp(12))
+}.lin(t = dp(6), b = dp(6))
+
+fun Context.copy(s: String, what: String = "Copied") {
+    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("Yogi One", s))
+    toast("📋 $what")
+}
+
+fun Context.shareText(s: String) {
+    try {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, s), "Share"))
+    } catch (_: Exception) {
+        toast("Nothing to share with")
+    }
+}
+
+/** Short buzz for taps that change something. */
+fun View.tick() {
+    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
 }
 
 private val inFmt: NumberFormat = NumberFormat.getNumberInstance(Locale("en", "IN")).apply { maximumFractionDigits = 0 }

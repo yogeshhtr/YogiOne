@@ -119,7 +119,7 @@ class HabitsTab(private val a: MainActivity) {
             check.background = if (today) rounded(C.GREEN, a.dpf(28f)) else rounded(0, a.dpf(28f), a.dp(3), C.LINE)
             row.addView(check.lin(a.dp(56), a.dp(56)))
             c.addView(row)
-            c.setOnClickListener { Habits.toggle(i, Day.key()); a.refresh() }
+            c.setOnClickListener { c.tick(); Habits.toggle(i, Day.key()); a.refresh() }
             c.setOnLongClickListener { options(i, h); true }
             col.addView(c)
         }

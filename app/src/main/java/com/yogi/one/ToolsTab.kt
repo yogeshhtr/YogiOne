@@ -19,7 +19,10 @@ import androidx.core.widget.doAfterTextChanged
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
@@ -58,9 +61,12 @@ class ToolsTab(private val a: MainActivity) {
     fun build(): View {
         val (sv, col) = a.page()
         col.addView(a.header("Tools", "Everything handy, in one place"))
+        val more = MoreTools(a)
         val tools = listOf(
+            Tool("📷", "QR codes", "Scan or make one", C.ACCENT) { more.qr() },
+            Tool("📝", "Notes", "${Store.arr("notes").length()} saved", C.GOLD) { more.notes() },
             Tool("🔦", "Torch", if (Torch.on) "ON — tap to turn off" else "Phone flashlight", C.GOLD) {
-                if (!Torch.toggle(a)) a.toast("No flashlight on this phone")
+                if (!Torch.toggle(a)) a.toast("No flashlight on this phone") else a.window.decorView.tick()
                 a.refresh()
             },
             Tool("🧭", "Compass", "Find your direction", C.BLUE) { compass() },
@@ -71,6 +77,7 @@ class ToolsTab(private val a: MainActivity) {
             Tool("⏱", "Stopwatch", "With laps", C.RED) { stopwatch() },
             Tool("🎂", "Age", "Exact age & birthday", C.PINK) { age() },
             Tool("⚖️", "BMI", "Body mass index", C.GREEN) { bmi() },
+            Tool("🔐", "Password", "Strong & random", C.BLUE) { more.password() },
             Tool("🎲", "Dice & coin", "Let luck decide", C.GOLD) { dice() }
         )
         for (pair in tools.chunked(2)) {
@@ -120,6 +127,8 @@ class ToolsTab(private val a: MainActivity) {
         val ori = FloatArray(3)
         var hasG = false
         var hasM = false
+        var sx = 1f
+        var sy = 0f
         val listener = object : SensorEventListener {
             override fun onSensorChanged(e: SensorEvent) {
                 val target = if (e.sensor.type == Sensor.TYPE_ACCELEROMETER) {
@@ -132,7 +141,10 @@ class ToolsTab(private val a: MainActivity) {
                 for (i in 0..2) target[i] = target[i] + 0.15f * (e.values[i] - target[i])
                 if (hasG && hasM && SensorManager.getRotationMatrix(rot, null, g, m)) {
                     SensorManager.getOrientation(rot, ori)
-                    view.heading = (Math.toDegrees(ori[0].toDouble()).toFloat() + 360f) % 360f
+                    // smooth the angle as a direction (no jumping between 359° and 0°)
+                    sx = sx * 0.8f + cos(ori[0]) * 0.2f
+                    sy = sy * 0.8f + sin(ori[0]) * 0.2f
+                    view.heading = (Math.toDegrees(atan2(sy, sx).toDouble()).toFloat() + 360f) % 360f
                 }
             }
 
@@ -219,7 +231,7 @@ class ToolsTab(private val a: MainActivity) {
         fun fromSpinner() {
             fromHolder.removeAllViews()
             from = 0
-            fromHolder.addView(a.spinner(unitTable.getValue(cats[cat]).map { it.first }, 0) { from = it; calc() })
+            fromHolder.addView(a.picker(unitTable.getValue(cats[cat]).map { it.first }, 0) { from = it; calc() })
         }
         fun drawCats() {
             catRow.removeAllViews()

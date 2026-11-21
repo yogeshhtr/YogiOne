@@ -1,5 +1,7 @@
 package com.yogi.one
 
+import android.app.TimePickerDialog
+import android.content.DialogInterface
 import android.graphics.Paint
 import android.view.Gravity
 import android.view.View
@@ -16,6 +18,7 @@ import kotlin.math.roundToInt
 
 /** Home: clock, weather, today's numbers, exchange rates, a thought and the to-do list. */
 class TodayTab(private val a: MainActivity) {
+    private var weatherCard: LinearLayout? = null
 
     fun build(): View {
         val (sv, col) = a.page()
@@ -32,7 +35,15 @@ class TodayTab(private val a: MainActivity) {
         head.addView(clock)
         head.addView(date)
         name.setOnClickListener { askName() }
-        col.addView(head)
+        val top = a.hbox()
+        top.gravity = Gravity.TOP
+        top.addView(head.lin(0, WRAP, 1f))
+        val gear = a.label("⚙️", 24f)
+        gear.gravity = Gravity.CENTER
+        gear.background = a.ripple(C.CARD, 24f)
+        gear.setOnClickListener { settings() }
+        top.addView(gear.lin(a.dp(48), a.dp(48), t = a.dp(18), r = a.dp(16)))
+        col.addView(top)
         val clockFmt = SimpleDateFormat("HH:mm:ss", Locale.US)
         val dateFmt = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.US)
         val update: () -> Unit = {
@@ -56,6 +67,7 @@ class TodayTab(private val a: MainActivity) {
         // ---------- weather
         col.addView(a.section("WEATHER"))
         val wx = a.card()
+        weatherCard = wx
         col.addView(wx)
         val cachedWx = Weather.cached()
         fillWeather(wx, cachedWx)
@@ -115,6 +127,57 @@ class TodayTab(private val a: MainActivity) {
         v.addView(a.label(what, 11f, C.SUB).apply { gravity = Gravity.CENTER })
         v.setOnClickListener { onClick() }
         return v.lin(0, WRAP, 1f, a.dp(4), 0, a.dp(4), 0)
+    }
+
+    // ================= settings
+
+    private fun settings() {
+        val body = a.vbox()
+        var dlg: AlertDialog? = null
+        fun item(icon: String, name: String, value: String, onClick: () -> Unit) {
+            val row = a.hbox()
+            row.background = a.ripple(C.CARD2, 14f)
+            row.setPadding(a.dp(14), a.dp(14), a.dp(14), a.dp(14))
+            row.addView(a.label(icon, 20f).lin(WRAP, WRAP, r = a.dp(14)))
+            row.addView(a.label(name, 15f, C.TEXT, true).lin(0, WRAP, 1f))
+            row.addView(a.label(value, 13f, C.SUB))
+            row.setOnClickListener { dlg?.dismiss(); onClick() }
+            body.addView(row.lin(t = a.dp(4), b = a.dp(4)))
+        }
+        item("👤", "Your name", Store.str("name", "Yogi")) { askName() }
+        item("📍", "Weather city", Weather.city()) { weatherCard?.let { pickCity(it) } }
+        item("⏰", "Daily reminder", Reminders.dailyText()) { reminder() }
+        item("💾", "Back up all data", "to a file") { a.backup() }
+        item("📂", "Restore a backup", "from a file") {
+            AlertDialog.Builder(a)
+                .setTitle("Restore a backup?")
+                .setMessage("Everything in the app now will be replaced by the backup.")
+                .setPositiveButton("Choose file") { _, _ -> a.restore() }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        item("🔔", "Notifications", if (Reminders.canNotify(a)) "Allowed" else "Tap to allow") { a.askNotify() }
+        val version = try { a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { "" }
+        body.addView(a.label("Yogi One $version · your data never leaves this phone", 11f, C.SUB)
+            .apply { gravity = Gravity.CENTER }.lin(t = a.dp(12)))
+        dlg = a.sheet("⚙️ Settings", body)
+    }
+
+    private fun reminder() {
+        val m = Reminders.dailyMinutes().let { if (it < 0) 20 * 60 else it }
+        val d = TimePickerDialog(a, { _, h, min ->
+            Reminders.setDaily(a, h * 60 + min)
+            a.askNotify()
+            a.toast("⏰ Daily reminder at ${Reminders.dailyText()}")
+        }, m / 60, m % 60, false)
+        d.setTitle("Daily habit reminder")
+        if (Reminders.dailyMinutes() >= 0) {
+            d.setButton(DialogInterface.BUTTON_NEUTRAL, "Turn off") { _, _ ->
+                Reminders.setDaily(a, -1)
+                a.toast("Reminder off")
+            }
+        }
+        d.show()
     }
 
     private fun askName() {
@@ -280,7 +343,7 @@ class TodayTab(private val a: MainActivity) {
             }
             dirBtn.text = if (toNpr) "⇄  ${r.iso} → NPR" else "⇄  NPR → ${r.iso}"
         }
-        body.addView(a.spinner(list.map { "${Forex.flag(it.iso)}  ${it.iso} · ${it.name}" }, idx) { idx = it; calc() })
+        body.addView(a.picker(list.map { "${Forex.flag(it.iso)}  ${it.iso} · ${it.name}" }, idx) { idx = it; calc() })
         body.addView(amt)
         dirBtn.setOnClickListener { toNpr = !toNpr; calc() }
         body.addView(dirBtn)

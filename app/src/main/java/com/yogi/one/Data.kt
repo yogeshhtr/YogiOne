@@ -14,9 +14,13 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/** Everything is saved on the phone (no account, no cloud). */
+/**
+ * Everything is saved on the phone (no account, no cloud).
+ * Lists / objects are parsed once and kept in memory (faster tabs); writes update both.
+ */
 object Store {
     private lateinit var sp: SharedPreferences
+    private val cache = HashMap<String, Any>()
 
     fun init(ctx: Context) {
         if (!::sp.isInitialized) sp = ctx.applicationContext.getSharedPreferences("yogione", Context.MODE_PRIVATE)
@@ -24,16 +28,74 @@ object Store {
 
     fun has(k: String): Boolean = sp.contains(k)
     fun str(k: String, d: String = ""): String = sp.getString(k, d) ?: d
-    fun setStr(k: String, v: String) { sp.edit().putString(k, v).apply() }
+    fun setStr(k: String, v: String) {
+        synchronized(cache) { cache.remove(k) }
+        sp.edit().putString(k, v).apply()
+    }
     fun int(k: String, d: Int = 0): Int = sp.getInt(k, d)
     fun setInt(k: String, v: Int) { sp.edit().putInt(k, v).apply() }
     fun long(k: String, d: Long = 0L): Long = sp.getLong(k, d)
     fun setLong(k: String, v: Long) { sp.edit().putLong(k, v).apply() }
 
-    fun arr(k: String): JSONArray = try { JSONArray(str(k, "[]")) } catch (_: Exception) { JSONArray() }
-    fun setArr(k: String, a: JSONArray) { setStr(k, a.toString()) }
-    fun obj(k: String): JSONObject = try { JSONObject(str(k, "{}")) } catch (_: Exception) { JSONObject() }
-    fun setObj(k: String, o: JSONObject) { setStr(k, o.toString()) }
+    fun arr(k: String): JSONArray = synchronized(cache) {
+        (cache[k] as? JSONArray) ?: (try { JSONArray(str(k, "[]")) } catch (_: Exception) { JSONArray() }).also { cache[k] = it }
+    }
+    fun setArr(k: String, a: JSONArray) {
+        setStr(k, a.toString())
+        synchronized(cache) { cache[k] = a }
+    }
+    fun obj(k: String): JSONObject = synchronized(cache) {
+        (cache[k] as? JSONObject) ?: (try { JSONObject(str(k, "{}")) } catch (_: Exception) { JSONObject() }).also { cache[k] = it }
+    }
+    fun setObj(k: String, o: JSONObject) {
+        setStr(k, o.toString())
+        synchronized(cache) { cache[k] = o }
+    }
+
+    /** All data as one JSON text (backup file). Downloaded weather/rates are left out. */
+    fun export(): String {
+        val data = JSONObject()
+        for ((k, v) in sp.all) {
+            if (k == "wx" || k == "fx" || k == "wx_t" || k == "fx_t") continue
+            val o = JSONObject()
+            when (v) {
+                is String -> o.put("t", "s").put("v", v)
+                is Int -> o.put("t", "i").put("v", v)
+                is Long -> o.put("t", "l").put("v", v)
+                is Boolean -> o.put("t", "b").put("v", v)
+                is Float -> o.put("t", "f").put("v", v.toDouble())
+                else -> continue
+            }
+            data.put(k, o)
+        }
+        return JSONObject().put("app", "YogiOne").put("version", 1)
+            .put("saved", Day.key()).put("data", data).toString(1)
+    }
+
+    /** Replaces everything with a backup. False = not a Yogi One backup. */
+    fun restore(json: String): Boolean {
+        try {
+            val root = JSONObject(json)
+            if (root.optString("app") != "YogiOne") return false
+            val data = root.getJSONObject("data")
+            val e = sp.edit().clear()
+            for (k in data.keys()) {
+                val o = data.getJSONObject(k)
+                when (o.optString("t")) {
+                    "s" -> e.putString(k, o.optString("v"))
+                    "i" -> e.putInt(k, o.optInt("v"))
+                    "l" -> e.putLong(k, o.optLong("v"))
+                    "b" -> e.putBoolean(k, o.optBoolean("v"))
+                    "f" -> e.putFloat(k, o.optDouble("v", 0.0).toFloat())
+                }
+            }
+            e.commit()
+            synchronized(cache) { cache.clear() }
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
 }
 
 fun without(a: JSONArray, index: Int): JSONArray {
@@ -43,14 +105,16 @@ fun without(a: JSONArray, index: Int): JSONArray {
 }
 
 object Day {
-    fun key(t: Long = System.currentTimeMillis()): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(t))
+    private val keyFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val dayFmt = SimpleDateFormat("EEE", Locale.US)
+    fun key(t: Long = System.currentTimeMillis()): String = synchronized(keyFmt) { keyFmt.format(Date(t)) }
     fun cal(daysAgo: Int): Calendar {
         val c = Calendar.getInstance()
         c.add(Calendar.DAY_OF_YEAR, -daysAgo)
         return c
     }
     fun ago(n: Int): String = key(cal(n).timeInMillis)
-    fun weekday(n: Int): String = SimpleDateFormat("EEE", Locale.US).format(cal(n).time)
+    fun weekday(n: Int): String = synchronized(dayFmt) { dayFmt.format(cal(n).time) }
 }
 
 object Net {

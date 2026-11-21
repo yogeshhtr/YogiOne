@@ -25,20 +25,24 @@ object Focus {
         if (running()) (Store.long("f_end") - now()).coerceAtLeast(0L)
         else Store.long("f_left").takeIf { it > 0 } ?: totalMs()
 
-    fun start() {
-        val l = leftMs()
-        Store.setLong("f_end", now() + l)
+    /** Starts (or continues) and sets an alarm, so a notification comes even when the app is closed. */
+    fun start(ctx: Context) {
+        val end = now() + leftMs()
+        Store.setLong("f_end", end)
+        Reminders.scheduleFocus(ctx, end)
     }
 
-    fun pause() {
+    fun pause(ctx: Context) {
         val l = leftMs()
         Store.setLong("f_end", 0)
         Store.setLong("f_left", l)
+        Reminders.cancelFocus(ctx)
     }
 
-    fun reset() {
+    fun reset(ctx: Context) {
         Store.setLong("f_end", 0)
         Store.setLong("f_left", 0)
+        Reminders.cancelFocus(ctx)
     }
 
     /** True when the timer just ended (and was saved). */
@@ -55,7 +59,7 @@ object Focus {
             add("f_ses", 1)
         }
         Store.setStr("f_mode", if (mode() == "work") "break" else "work")
-        reset()
+        reset(ctx)
         if (alert) ring(ctx)
     }
 
@@ -136,11 +140,12 @@ class FocusTab(private val a: MainActivity) {
             else a.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         main.setOnClickListener {
-            if (Focus.running()) Focus.pause() else Focus.start()
+            if (Focus.running()) Focus.pause(a) else { Focus.start(a); a.askNotify() }
+            main.tick()
             update()
         }
         btns.addView(main.lin(0, WRAP, 1.4f, r = a.dp(8)))
-        btns.addView(a.pill("↺", C.CARD2) { Focus.reset(); update() }.lin(0, WRAP, 0.6f, r = a.dp(8)))
+        btns.addView(a.pill("↺", C.CARD2) { Focus.reset(a); update() }.lin(0, WRAP, 0.6f, r = a.dp(8)))
         btns.addView(a.pill("⏭", C.CARD2) {
             Focus.finish(a, alert = false, counted = false)
             a.refresh()
@@ -156,7 +161,7 @@ class FocusTab(private val a: MainActivity) {
         for (m in listOf(15, 25, 45, 60, 90)) {
             wr.addView(a.chip("$m min", Focus.work() == m) {
                 Store.setInt("f_len", m)
-                if (!Focus.running()) Focus.reset()
+                if (!Focus.running()) Focus.reset(a)
                 a.refresh()
             })
         }
@@ -167,7 +172,7 @@ class FocusTab(private val a: MainActivity) {
         for (m in listOf(5, 10, 15, 20)) {
             br.addView(a.chip("$m min", Focus.rest() == m) {
                 Store.setInt("f_brk", m)
-                if (!Focus.running()) Focus.reset()
+                if (!Focus.running()) Focus.reset(a)
                 a.refresh()
             })
         }

@@ -10,7 +10,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.Manifest
+import android.os.Build
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 /** One screen with five tabs at the bottom. */
@@ -28,6 +31,8 @@ class MainActivity : AppCompatActivity() {
     private val tick = object : Runnable {
         override fun run() {
             ticker?.invoke()
+            // a focus round that ends while another tab is open
+            if (current != 1 && Focus.checkDone(this@MainActivity)) toast("⏰ Focus round finished!")
             handler.postDelayed(this, 500)
         }
     }
@@ -40,6 +45,48 @@ class MainActivity : AppCompatActivity() {
                 isEnabled = false
                 onBackPressedDispatcher.onBackPressed()
             }
+        }
+    }
+
+    // ---------- backup / restore (files the user picks)
+    private val saveDoc = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(Store.export().toByteArray()) }
+            toast("✅ Backup saved")
+        } catch (_: Exception) {
+            toast("Couldn't save the backup")
+        }
+    }
+
+    private val openDoc = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val text = try {
+            contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }
+        } catch (_: Exception) {
+            null
+        }
+        if (text != null && Store.restore(text)) {
+            Reminders.scheduleDaily(this)
+            toast("✅ Restored")
+            show(0)
+        } else {
+            toast("That file is not a Yogi One backup")
+        }
+    }
+
+    fun backup() {
+        saveDoc.launch("YogiOne-backup-${Day.key()}.json")
+    }
+
+    fun restore() {
+        openDoc.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"))
+    }
+
+    /** Android 13+: asks once to allow notifications (timer end, daily reminder). */
+    fun askNotify() {
+        if (Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(this)) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
         }
     }
 
@@ -62,7 +109,7 @@ class MainActivity : AppCompatActivity() {
             item.gravity = Gravity.CENTER
             item.background = ripple(C.CARD, 14f)
             item.setPadding(0, dp(4), 0, dp(4))
-            item.setOnClickListener { show(i) }
+            item.setOnClickListener { if (i != current) { item.tick(); show(i) } }
             val ic = label(icon, 21f)
             ic.gravity = Gravity.CENTER
             val tx = label(name, 11f, C.SUB, true)
@@ -76,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
         onBackPressedDispatcher.addCallback(this, back)
         show(Store.int("tab", 0).coerceIn(0, tabs.size - 1))
+        Reminders.scheduleDaily(this)
     }
 
     fun show(i: Int) {
